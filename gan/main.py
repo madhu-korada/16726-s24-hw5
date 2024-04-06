@@ -19,8 +19,10 @@ from torchvision.models import vgg19
 
 from dataloader import get_data_loader
 
+import warnings
+warnings.filterwarnings("ignore")
 
-def build_model(name):
+def build_model(name, debug=False):
     if name.startswith('vanilla'):
         z_dim = 100
         model_path = 'pretrained/%s.ckpt' % name
@@ -28,7 +30,10 @@ def build_model(name):
         from vanilla.models import DCGenerator
         model = DCGenerator(z_dim, 32, 'instance')
         model.load_state_dict(pretrain)
-
+        if debug:
+            print('load model from %s' % model_path)
+            print(model)
+            
     elif name == 'stylegan':
         model_path = 'pretrained/%s.ckpt' % name
         import sys
@@ -37,6 +42,9 @@ def build_model(name):
         with dnnlib.util.open_url(model_path) as f:
             model = legacy.load_network_pkl(f)['G_ema']
             z_dim = model.z_dim
+            if debug:
+                print('load model from %s' % model_path)
+                print(model)
     else:
          return NotImplementedError('model [%s] is not implemented', name)
     if torch.cuda.is_available():
@@ -96,13 +104,39 @@ class PerceptualLoss(nn.Module):
         #                hint: hw4
         # You may split the model into different parts and store each part in 'self.model'
         self.model = nn.ModuleList()
-
+        self.add_layer = add_layer
+        self.build_model(cnn)
+    
+    def build_model(self, cnn):
+        print(f'\n------------------- Model Layers -------------------')
+        i = 0  # increment every time we see a conv
+        for layer in cnn.children():
+            if isinstance(layer, nn.Conv2d):
+                i += 1
+                name = 'conv_{}'.format(i)
+            elif isinstance(layer, nn.ReLU):
+                name = 'relu_{}'.format(i)
+                layer = nn.ReLU(inplace=False)
+            elif isinstance(layer, nn.MaxPool2d):
+                name = 'pool_{}'.format(i)
+            elif isinstance(layer, nn.BatchNorm2d):
+                name = 'bn_{}'.format(i)
+            elif name == self.add_layer[-1]:
+                break
+            else:
+                raise RuntimeError('Unrecognized layer: {}'.format(layer.__class__.__name__))
+            self.model.add_module(name, layer)
+            print(f'Name: {name}, Layer: {layer}')
+        
+        print(f'------------------------------------------------------\n')
+    
     def forward(self, pred, target):
-
+        mask = None
         if isinstance(target, tuple):
             target, mask = target
         
         loss = 0.
+        i = 0
         for net in self.model:
             pred = net(pred)
             target = net(target)
@@ -110,10 +144,23 @@ class PerceptualLoss(nn.Module):
             # TODO (Part 1): implement the forward call for perceptual loss
             #                free feel to rewrite the entire forward call based on your
             #                implementation in hw4
+            if isinstance(net, nn.Conv2d):
+                i = i + 1
+                name = 'conv_{}'.format(i)
+                if name in self.add_layer:
+                    if mask is not None:
+                        mask = F.adaptive_avg_pool2d(mask, (pred.shape[2], pred.shape[3]))
+                        mask = mask.expand_as(pred)
+                        pred = pred * mask
+                        target = target * mask
+                        loss += F.mse_loss(pred, target)
+                    else:
+                        loss += F.mse_loss(pred, target)
+                    
             # TODO (Part 3): if mask is not None, then you should mask out the gradient
             #                based on 'mask==0'. You may use F.adaptive_avg_pool2d() to 
             #                resize the mask such that it has the same shape as the feature map.
-            pass
+            
         return loss
 
 class Criterion(nn.Module):
@@ -130,10 +177,17 @@ class Criterion(nn.Module):
         if self.mask:
             target, mask = target
             # TODO (Part 3): loss with mask
-            pass
-        else:
-            # TODO (Part 1): loss w/o mask
-            pass
+            pred = pred * mask
+            target = target * mask
+        # else:
+        #     # TODO (Part 1): loss w/o mask
+        #     loss = self.perc(pred, target)
+        
+        # calculate lp loss
+        l1_loss = F.l1_loss(pred, target, reduction='mean') * self.l1_wgt
+        # l2_loss = F.mse_loss(pred, target)
+        perc_loss = self.perc(pred, target)
+        loss = l1_loss + self.perc_wgt * perc_loss
         return loss
 
 
@@ -182,14 +236,28 @@ def sample_noise(dim, device, latent, model, N=1, from_mean=False):
         vector = torch.randn(N, dim, device=device) if not from_mean else torch.zeros(N, dim, device=device)
     elif latent == 'w':
         if from_mean:
-            vector = #TODO
+            vector = torch.randn(10000, dim, device=device)
+            vector = model.mapping(vector, None).mean(dim=0, keepdim=True)
+            vector = vector[:, 0, :]
+            # print(f'from_mean z shape: {vector.shape}')
+            # print(f'from_mean w shape: {vector.shape}')
+            # print(f'from_mean w shape: {vector.shape}')
         else:
-            vector = #TODO
+            noise_vector = torch.randn(N, dim, device=device)   # batch * dim
+            vector = model.mapping(noise_vector, None)          # batch * 10 * dim
+            vector = vector[:, 0, :]                            # batch * dim
+            vector = vector.unsqueeze(1)                        # batch * 1 * dim
+            # print(f'z shape: {noise_vector.shape}')
+            # print(f'w shape: {vector.shape}')
     elif latent == 'w+':
         if from_mean:
-            vector = #TODO
+            noise_vector = torch.randn(10000, dim, device=device)
+            vector = model.mapping(noise_vector, None).mean(dim=0, keepdim=True)
+            # print(f'from_mean z shape: {vector.shape}')
+            # print(f'from_mean w+ shape: {vector.shape}')
         else:
-            vector = #TODO
+            vector = torch.randn(N, dim, device=device)
+            vector = model.mapping(vector, None)
     else:
         raise NotImplementedError('%s is not supported' % latent)
     return vector
@@ -209,6 +277,10 @@ def optimize_para(wrapper, param, target, criterion, num_step, save_prefix=None,
     def closure():
         iter_count[0] += 1
         # TODO (Part 1): Your optimiztion code. Free free to try out SGD/Adam.
+        optimizer.zero_grad()
+        image = wrapper(param + delta)
+        loss = criterion(image, target)
+        
         if iter_count[0] % 250 == 0:
             # visualization code
             print('iter count {} loss {:4f}'.format(iter_count, loss.item()))
@@ -229,7 +301,7 @@ def optimize_para(wrapper, param, target, criterion, num_step, save_prefix=None,
 def sample(args):
     model, z_dim = build_model(args.model)
     wrapper = Wrapper(args, model, z_dim)
-    batch_size = 16
+    batch_size = args.batch_size
     if torch.cuda.is_available():
         device = 'cuda'
     else:
@@ -319,6 +391,7 @@ def parse_arg():
     parser.add_argument('--perc_wgt', type=float, default=0.01, help="perc loss weight")
     parser.add_argument('--l1_wgt', type=float, default=10., help="L1 pixel loss weight")
     parser.add_argument('--resolution', type=int, default=64, help='Resolution of images')
+    parser.add_argument('--batch_size', type=int, default=16, help='Batch Size')
     parser.add_argument('--input', type=str, default='data/cat/*.png', help="path to the input image")
     return parser.parse_args()
 
