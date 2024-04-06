@@ -3,4 +3,4 @@ data/
 output/
 pretrained/
 
-*.zip/
+*.zip
