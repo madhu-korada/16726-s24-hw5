@@ -18,7 +18,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--prompt", type=str, nargs="?", default="a painting of a virus monster playing guitar", help="the prompt to render")
-    parser.add_argument("--input-img", type=str, nargs="?", help="path to the input image")
+    parser.add_argument("--input-img", type=str, nargs="?", default="assets/sketch-cat-512.png", help="path to the input image")
     parser.add_argument("--num_timesteps", type=int, default=500, help="number of ddpm sampling steps")
     parser.add_argument("--strength", type=float, default=15.0, help="guidance strength")
     parser.add_argument("--seed", type=int, default=10, help="the seed (for reproducible sampling)")
@@ -72,14 +72,17 @@ def main():
         cond = model.get_learned_conditioning([prompt])
         
         # TODO: Generate noise tensor for the input image
+        noise = torch.randn_like(init_latent)
         
         # TODO: Add noise to the latent space and get the encoded latent state
+        init_latent = init_latent + noise * torch.sqrt(alpha_cumprods[opt.num_timesteps-1])
 
         # TODO: Reverse the timesteps for denoising
-        reversed_time_range = 
+        reversed_time_range = reversed(timesteps)
 
         # TODO: Initialize the latent state for DDPM sampling
-        latent = 
+        latent = init_latent
+        
         # Loop over the reversed time steps
         for i, timestep in tqdm(enumerate(reversed_time_range)):            
             # Timestep tensor for the current step 
@@ -95,13 +98,17 @@ def main():
             #         So you need to repeat the latent and timestep tensors for the two guidance scores as well
             # Hint 3: Use the chunk function to separate the score estimator after applying the model
             #         to separate the conditional and unconditional guidance
-            e_t_uncond, e_t_cond = 
+            x_in = repeat(latent, 'b ... -> (repeat b) ...', repeat=2)
+            t_in = repeat(timestep_tensor, 'b -> (repeat b)', repeat=2)
+            c_in = torch.cat([uncond, cond], dim=0)
+            e_t_combined = model.apply_model(x_in, t_in, c_in)
+            e_t_uncond, e_t_cond = torch.chunk(e_t_combined, 2, dim=0)
             
             # TODO: Calculate the classifier-free diffusion guidance score
-            e_t = 
+            e_t = e_t_uncond + opt.strength * (e_t_cond - e_t_uncond)
 
             # TODO: Update the latent state using DDPM Sampling
-            latent = 
+            latent = model.p_sample(latent, e_t, timestep_tensor)
 
         # Get the decoded sample from the first stage
         output_images = model.decode_first_stage(latent)
