@@ -64,7 +64,6 @@ def main():
     with torch.no_grad():
         # Move input image to latent space
         init_latent = model.get_first_stage_encoding(model.encode_first_stage(input_image))
-        # print("init_latent.shape: ", init_latent.shape)
         # Set the unconditional conditioning
         uncond = model.get_learned_conditioning([""])
         
@@ -75,14 +74,11 @@ def main():
         noise = torch.randn_like(init_latent)
         
         # TODO: Add noise to the latent space and get the encoded latent state
-        # init_latent = init_latent + noise * torch.sqrt(alpha_cumprods[opt.num_timesteps-1])
-        # print("init_latent.shape after noise: ", init_latent.shape)
         latent = torch.sqrt(alpha_cumprods[-1]) * init_latent + (torch.sqrt(1 - alpha_cumprods[-1]) * noise)
 
 
         # TODO: Reverse the timesteps for denoising
         reversed_time_range = reversed(timesteps)        
-        # reversed_time_range = list(range(opt.num_timesteps, 0, -1))
 
         # TODO: Initialize the latent state for DDPM sampling
         # latent = init_latent
@@ -95,9 +91,7 @@ def main():
         for i, timestep in tqdm(enumerate(reversed_time_range)):            
             # Timestep tensor for the current step 
             # timestep = torch.full(size=(1,), fill_value=timestep,  device=device, dtype=torch.long)
-            # timestep_tensor = torch.full((latent.shape[0],), timestep, device=device, dtype=torch.long)
             timestep_tensor = torch.full(size=(1,), fill_value=timestep,  device=device, dtype=torch.long)
-            # print("timestep_tensor.shape: ", timestep_tensor.shape)
             # TODO: Get the score estimator for the conditional and unconditional guidance
             # Hint 1: Use the apply_model function which returns the score estimator for the conditional and unconditional guidance
             #      The function takes in three arguments: x_in, t_in, c_in
@@ -119,10 +113,7 @@ def main():
             e_t = e_t_uncond + opt.strength * (e_t_cond - e_t_uncond)
             
             # TODO: Update the latent state using DDPM Sampling
-            # latent = model.p_sample(latent, e_t, timestep_tensor)
-            # sigma_t = torch.sqrt(torch.tensor(model.betas[timestep], device=device))
             sigma_t = torch.sqrt(((1 - alpha_cumprods[timestep - 1]) / (1 - alpha_cumprods[timestep])) * (1 - alphas[timestep]))
-            # latent = (1 - model.betas[timestep]) * latent + sigma_t * e_t
             noise = torch.randn_like(init_latent)
             latent = (1 / torch.sqrt(alphas[timestep - 1])) * (latent - ((1 - alphas[timestep]) / torch.sqrt(1 - alpha_cumprods[timestep])) * e_t) + sigma_t * noise
 
