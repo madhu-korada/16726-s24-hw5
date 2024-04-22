@@ -114,7 +114,9 @@ def main():
             
             # TODO: Update the latent state using DDPM Sampling
             sigma_t = torch.sqrt(((1 - alpha_cumprods[timestep - 1]) / (1 - alpha_cumprods[timestep])) * (1 - alphas[timestep]))
-            noise = torch.randn_like(init_latent)
+            # noise = torch.randn_like(init_latent)
+            noise = torch.randn_like(latent) if i < (opt.num_timesteps - 1) else torch.zeros_like(latent)
+
             latent = (1 / torch.sqrt(alphas[timestep - 1])) * (latent - ((1 - alphas[timestep]) / torch.sqrt(1 - alpha_cumprods[timestep])) * e_t) + sigma_t * noise
 
             # Save the output image at 10% of the total timesteps
