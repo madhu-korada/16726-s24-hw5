@@ -64,7 +64,7 @@ def main():
     with torch.no_grad():
         # Move input image to latent space
         init_latent = model.get_first_stage_encoding(model.encode_first_stage(input_image))
-
+        # print("init_latent.shape: ", init_latent.shape)
         # Set the unconditional conditioning
         uncond = model.get_learned_conditioning([""])
         
@@ -75,19 +75,29 @@ def main():
         noise = torch.randn_like(init_latent)
         
         # TODO: Add noise to the latent space and get the encoded latent state
-        init_latent = init_latent + noise * torch.sqrt(alpha_cumprods[opt.num_timesteps-1])
+        # init_latent = init_latent + noise * torch.sqrt(alpha_cumprods[opt.num_timesteps-1])
+        # print("init_latent.shape after noise: ", init_latent.shape)
+        latent = torch.sqrt(alpha_cumprods[-1]) * init_latent + (torch.sqrt(1 - alpha_cumprods[-1]) * noise)
+
 
         # TODO: Reverse the timesteps for denoising
-        reversed_time_range = reversed(timesteps)
+        reversed_time_range = reversed(timesteps)        
+        # reversed_time_range = list(range(opt.num_timesteps, 0, -1))
 
         # TODO: Initialize the latent state for DDPM sampling
-        latent = init_latent
+        # latent = init_latent
+        
+        
+        out_dir = "outputs/" + prompt.replace(" ", "_") + "/"
+        os.makedirs(out_dir, exist_ok=True)
         
         # Loop over the reversed time steps
         for i, timestep in tqdm(enumerate(reversed_time_range)):            
             # Timestep tensor for the current step 
-            timestep = torch.full(size=(1,), fill_value=timestep,  device=device, dtype=torch.long)
-            
+            # timestep = torch.full(size=(1,), fill_value=timestep,  device=device, dtype=torch.long)
+            # timestep_tensor = torch.full((latent.shape[0],), timestep, device=device, dtype=torch.long)
+            timestep_tensor = torch.full(size=(1,), fill_value=timestep,  device=device, dtype=torch.long)
+            # print("timestep_tensor.shape: ", timestep_tensor.shape)
             # TODO: Get the score estimator for the conditional and unconditional guidance
             # Hint 1: Use the apply_model function which returns the score estimator for the conditional and unconditional guidance
             #      The function takes in three arguments: x_in, t_in, c_in
@@ -101,25 +111,42 @@ def main():
             x_in = repeat(latent, 'b ... -> (repeat b) ...', repeat=2)
             t_in = repeat(timestep_tensor, 'b -> (repeat b)', repeat=2)
             c_in = torch.cat([uncond, cond], dim=0)
+            
             e_t_combined = model.apply_model(x_in, t_in, c_in)
             e_t_uncond, e_t_cond = torch.chunk(e_t_combined, 2, dim=0)
             
             # TODO: Calculate the classifier-free diffusion guidance score
             e_t = e_t_uncond + opt.strength * (e_t_cond - e_t_uncond)
-
+            
             # TODO: Update the latent state using DDPM Sampling
-            latent = model.p_sample(latent, e_t, timestep_tensor)
+            # latent = model.p_sample(latent, e_t, timestep_tensor)
+            # sigma_t = torch.sqrt(torch.tensor(model.betas[timestep], device=device))
+            sigma_t = torch.sqrt(((1 - alpha_cumprods[timestep - 1]) / (1 - alpha_cumprods[timestep])) * (1 - alphas[timestep]))
+            # latent = (1 - model.betas[timestep]) * latent + sigma_t * e_t
+            noise = torch.randn_like(init_latent)
+            latent = (1 / torch.sqrt(alphas[timestep - 1])) * (latent - ((1 - alphas[timestep]) / torch.sqrt(1 - alpha_cumprods[timestep])) * e_t) + sigma_t * noise
 
+            # Save the output image at 10% of the total timesteps
+            if i % (opt.num_timesteps // 10) == 0:
+                # Get the decoded sample from the first stage
+                output_image = model.decode_first_stage(latent)
+                output_image = torch.clamp((output_image + 1.0) / 2.0, min=0.0, max=1.0)
+                out_image = 255. * rearrange(output_image[0].cpu().numpy(), 'c h w -> h w c')
+                Image.fromarray(out_image.astype(np.uint8)).save(out_dir + f"{i:05}.png")
+            
         # Get the decoded sample from the first stage
         output_images = model.decode_first_stage(latent)
-
+        print("output_images.shape: ", output_images.shape)
+        
         # Clamp the output images from [-1, 1] to [0, 1]
         output_images = torch.clamp((output_images + 1.0) / 2.0, min=0.0, max=1.0)
+        print("output_images.shape after clamp: ", output_images.shape)
         
+        image_name = prompt.replace(" ", "_") + ".png"
         # Save images
         for i, out_image in enumerate(output_images):
             out_image = 255. * rearrange(out_image.cpu().numpy(), 'c h w -> h w c')
-            Image.fromarray(out_image.astype(np.uint8)).save(f"outputs/{i:05}.png")
+            Image.fromarray(out_image.astype(np.uint8)).save("outputs/" + image_name)
 
     print("Done!")
 

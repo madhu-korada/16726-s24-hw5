@@ -1,3 +1,6 @@
 latent_diffusion.egg-info/
 
 __pycache__/
+outputs/
+models/*.ckpt
+

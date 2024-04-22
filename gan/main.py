@@ -246,7 +246,7 @@ def sample_noise(dim, device, latent, model, N=1, from_mean=False):
             noise_vector = torch.randn(N, dim, device=device)   # batch * dim
             vector = model.mapping(noise_vector, None)          # batch * 10 * dim
             vector = vector[:, 0, :]                            # batch * dim
-            vector = vector.unsqueeze(1)                        # batch * 1 * dim
+            # vector = vector.unsqueeze(1)                        # batch * 1 * dim
             # print(f'z shape: {noise_vector.shape}')
             # print(f'w shape: {vector.shape}')
     elif latent == 'w+':
