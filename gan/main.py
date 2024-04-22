@@ -274,6 +274,7 @@ def optimize_para(wrapper, param, target, criterion, num_step, save_prefix=None,
     delta = delta.requires_grad_().to(device)
     optimizer = FullBatchLBFGS([delta], lr=.1, line_search='Wolfe')
     iter_count = [0]
+    
     def closure():
         iter_count[0] += 1
         # TODO (Part 1): Your optimiztion code. Free free to try out SGD/Adam.
@@ -348,7 +349,12 @@ def draw(args):
         save_images(mask, 'output/draw/%d_mask' % idx, 1)
         # TODO (Part 3): optimize sketch 2 image
         #                hint: Set from_mean=True when sampling noise vector
-
+        param = sample_noise(z_dim, device, args.latent, model, from_mean=True)
+        param, recon = optimize_para(wrapper, param, (rgb, mask), criterion, args.n_iters,
+                                        'output/draw/%d_%s_%s' % (idx, args.model, args.latent), True)
+        save_images(recon, 'output/draw/%d_%s_%s' % (idx, args.model, args.latent), 1)
+        # if idx >= 0:
+        #     break
 
 def interpolate(args):
     model, z_dim = build_model(args.model)
@@ -372,7 +378,11 @@ def interpolate(args):
         with torch.no_grad():
             # TODO (B&W): interpolation code
             #                hint: Write a for loop to append the convex combinations to image_list
-            pass
+            for alpha in alpha_list:
+                param = alpha * src + (1 - alpha) * dst
+                image = wrapper(param)
+                image_list.append(image)
+        
         save_gifs(image_list, 'output/interpolate/%d_%s_%s' % (idx, args.model, args.latent))
         if idx >= 3:
             break
