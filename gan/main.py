@@ -326,11 +326,14 @@ def project(args):
     criterion = Criterion(args)
     # project each image
     for idx, (data, _) in enumerate(loader):
+        idx = int(args.input.split('/')[-1].split('.')[0])
+        print("idx: ", idx)
         target = data.to(device)
         save_images(data, 'output/project/%d_data' % idx, 1)
         param = sample_noise(z_dim, device, args.latent, model)
         optimize_para(wrapper, param, target, criterion, args.n_iters,
-                      'output/project/%d_%s_%s_%g' % (idx, args.model, args.latent, args.perc_wgt))
+                      'output/project/%d_%s_%s_%g_%g' % (idx, args.model, args.latent, args.l1_wgt, args.perc_wgt))
+        print('projected %d' % idx)
         if idx >= 0:
             break
 
@@ -344,6 +347,8 @@ def draw(args):
     loader = get_data_loader(args.input, args.resolution, alpha=True)
     criterion = Criterion(args, True)
     for idx, (rgb, mask) in enumerate(loader):
+        idx = int(args.input.split('/')[-1].split('.')[0])
+        print("idx: ", idx)
         rgb, mask = rgb.to(device), mask.to(device)
         save_images(rgb, 'output/draw/%d_data' % idx, 1)
         save_images(mask, 'output/draw/%d_mask' % idx, 1)
@@ -353,8 +358,9 @@ def draw(args):
         param, recon = optimize_para(wrapper, param, (rgb, mask), criterion, args.n_iters,
                                         'output/draw/%d_%s_%s' % (idx, args.model, args.latent), True)
         save_images(recon, 'output/draw/%d_%s_%s' % (idx, args.model, args.latent), 1)
-        # if idx >= 0:
-        #     break
+        print('projected %d' % idx)
+        if idx >= 0:
+            break
 
 def interpolate(args):
     model, z_dim = build_model(args.model)
